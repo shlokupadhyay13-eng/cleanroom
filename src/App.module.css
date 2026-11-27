@@ -1,0 +1,107 @@
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.skipLink {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.skipLink:focus,
+.skipLink:focus-visible {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 100;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--space-4);
+  outline: none;
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  background-color: var(--surface);
+}
+
+.footerInner {
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.footerText {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--muted);
+  line-height: var(--leading-normal);
+}
+
+.privacyDetails {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.privacySummary {
+  display: inline-block;
+  cursor: pointer;
+  font-weight: var(--weight-medium);
+  color: var(--foreground);
+  border-radius: var(--radius-sm);
+}
+
+.privacySummary:hover {
+  color: var(--primary);
+}
+
+.privacyList {
+  margin: var(--space-2) 0 0 0;
+  padding: var(--space-3);
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+
+@media (min-width: 900px) {
+  .privacyList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.privacyItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.privacyItem dt {
+  font-weight: var(--weight-semibold);
+  color: var(--foreground);
+}
+
+.privacyItem dd {
+  margin: 0;
+  line-height: var(--leading-normal);
+}

@@ -1,0 +1,81 @@
+import { createPseudonymSession, sanitizeText } from '../engine';
+import type {
+  WorkerSanitizeRequest,
+  WorkerSanitizeResponse,
+} from '../types/worker';
+import { sanitizeCsvText } from '../utils/csvProcessor';
+
+interface SanitizationWorkerScope {
+  addEventListener(
+    type: 'message',
+    listener: (event: MessageEvent<WorkerSanitizeRequest>) => void,
+  ): void;
+  postMessage(message: WorkerSanitizeResponse): void;
+}
+
+const session = createPseudonymSession();
+const workerScope = globalThis as unknown as SanitizationWorkerScope;
+
+function postResponse(response: WorkerSanitizeResponse): void {
+  workerScope.postMessage(response);
+}
+
+export function handleWorkerRequest(message: WorkerSanitizeRequest): void {
+  if (message.type === 'clear-session') {
+    session.clear();
+    return;
+  }
+
+  const enabledCategories =
+    message.enabledCategories !== undefined
+      ? new Set(message.enabledCategories)
+      : undefined;
+
+  if (message.type === 'sanitize-text') {
+    try {
+      const { detection, redaction } = sanitizeText(message.text, {
+        mode: message.mode,
+        pseudonymSession: session,
+        ...(enabledCategories !== undefined ? { enabledCategories } : {}),
+      });
+      postResponse({
+        type: 'text-result',
+        requestId: message.requestId,
+        detection,
+        redaction,
+      });
+    } catch {
+      postResponse({
+        type: 'error',
+        requestId: message.requestId,
+        error: 'Unable to sanitize text inside local worker.',
+      });
+    }
+    return;
+  }
+
+  try {
+    const result = sanitizeCsvText(message.csvText, {
+      mode: message.mode,
+      pseudonymSession: session,
+      ...(enabledCategories !== undefined ? { enabledCategories } : {}),
+    });
+    postResponse({
+      type: 'csv-result',
+      requestId: message.requestId,
+      result,
+    });
+  } catch {
+    postResponse({
+      type: 'error',
+      requestId: message.requestId,
+      error: 'Unable to sanitize CSV inside local worker.',
+    });
+  }
+}
+
+if (typeof workerScope.addEventListener === 'function') {
+  workerScope.addEventListener('message', (event) => {
+    handleWorkerRequest(event.data);
+  });
+}

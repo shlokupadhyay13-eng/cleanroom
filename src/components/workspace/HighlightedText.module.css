@@ -1,0 +1,29 @@
+.container {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.empty {
+  font-family: var(--font-sans);
+  color: var(--muted);
+}
+
+.markDetected {
+  background-color: var(--danger-surface);
+  color: var(--danger);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}
+
+.markSanitized {
+  background-color: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}

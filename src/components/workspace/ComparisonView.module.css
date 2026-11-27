@@ -1,0 +1,124 @@
+.legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.swatchDetected,
+.swatchSanitized {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.swatchDetected {
+  background-color: var(--danger-surface);
+  border: 1px solid var(--danger-border);
+}
+
+.swatchSanitized {
+  background-color: var(--primary-soft);
+  border: 1px solid var(--border-strong);
+}
+
+.noMatchNote {
+  margin: 0 0 var(--space-3) 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.previewNotice {
+  margin: 0 0 var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.comparisonGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+@media (min-width: 900px) {
+  .comparisonGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.columnHeading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--muted);
+}
+
+.textPane {
+  min-height: 140px;
+  min-width: 0;
+  padding: var(--space-3);
+  background-color: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.tableWrapper {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+}
+
+.csvTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.csvTable th,
+.csvTable td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.csvTable th:last-child,
+.csvTable td:last-child {
+  border-right: none;
+}
+
+.csvTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.csvTable th {
+  background-color: var(--surface-subtle);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-semibold);
+  color: var(--foreground);
+  white-space: nowrap;
+}

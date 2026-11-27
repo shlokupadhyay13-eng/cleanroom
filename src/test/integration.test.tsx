@@ -118,9 +118,13 @@ describe('CLEANROOM end-to-end integration journeys', () => {
     );
     await user.upload(fileInput, validCsv);
 
-    const textarea = screen.getByLabelText('Source text for PII sanitization');
-    await user.clear(textarea);
-    await user.type(textarea, 'name,email\n"Alice,alice@example.org');
+    const textarea = screen.getByLabelText(
+      'Source text for PII sanitization',
+    ) as HTMLTextAreaElement;
+    await user.click(textarea);
+    textarea.setSelectionRange(11, 11);
+    await user.keyboard('"');
+    expect(textarea).toHaveValue('name,email\n"Alice,alice@example.org');
     await user.click(screen.getByRole('button', { name: 'Sanitize' }));
 
     expect(textarea).toHaveAttribute('aria-invalid', 'true');
@@ -128,8 +132,10 @@ describe('CLEANROOM end-to-end integration journeys', () => {
     expect(alert).toHaveTextContent(/malformed csv/i);
     expect(alert).not.toHaveTextContent('alice@example.org');
 
-    await user.clear(textarea);
-    await user.type(textarea, 'name,email\nAlice,alice@example.org');
+    await user.click(textarea);
+    textarea.setSelectionRange(12, 12);
+    await user.keyboard('{Backspace}');
+    expect(textarea).toHaveValue('name,email\nAlice,alice@example.org');
     await user.click(screen.getByRole('button', { name: 'Sanitize' }));
 
     expect(textarea).toHaveAttribute('aria-invalid', 'false');

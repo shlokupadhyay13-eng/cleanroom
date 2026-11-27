@@ -284,4 +284,55 @@ describe('App', () => {
     expect(logText).not.toContain('ABCPE1234F');
     expect(logText).not.toContain('4111-1111-1111-1111');
   });
+
+  it('detaches CSV file mode when selecting all and pasting plain text', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Sample CSV' }));
+    expect(screen.getByText('sample-records.csv (CSV)')).toBeInTheDocument();
+
+    const textarea = screen.getByLabelText(
+      'Source text for PII sanitization',
+    ) as HTMLTextAreaElement;
+    await user.click(textarea);
+    textarea.setSelectionRange(0, textarea.value.length);
+    await user.paste('Contact john@example.com or card 4111-1111-1111-1111');
+
+    expect(
+      screen.queryByText('sample-records.csv (CSV)'),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Sanitize' }));
+
+    const outputRegion = await screen.findByRole('region', {
+      name: 'Sanitized Output',
+    });
+    expect(within(outputRegion).getAllByText('[REDACTED]')).toHaveLength(2);
+    expect(outputRegion).not.toHaveTextContent('john@example.com');
+    expect(outputRegion).not.toHaveTextContent('4111-1111-1111-1111');
+  });
+
+  it('detaches CSV file mode when clicking the file badge detach button and re-runs as plain text', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: 'Sample CSV' }));
+    expect(screen.getByText('sample-records.csv (CSV)')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Sanitize' }));
+    expect(await screen.findAllByRole('table')).toHaveLength(2);
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Detach file and treat input as plain text',
+      }),
+    );
+
+    expect(
+      screen.queryByText('sample-records.csv (CSV)'),
+    ).not.toBeInTheDocument();
+    expect(await screen.findByText('Output: Ready (TXT)')).toBeInTheDocument();
+    expect(screen.queryAllByRole('table')).toHaveLength(0);
+  });
 });

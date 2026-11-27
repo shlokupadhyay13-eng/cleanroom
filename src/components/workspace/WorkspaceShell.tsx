@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
 } from 'react';
@@ -608,6 +609,35 @@ export function WorkspaceShell() {
     }
   }
 
+  function handleDetachFile(): void {
+    setLoadedFile(null);
+    if (
+      sanitizedState !== null &&
+      sourceText.trim().length > 0 &&
+      enabledCategories.size > 0
+    ) {
+      void executeSanitization(
+        sourceText,
+        redactionMode,
+        'txt',
+        'text',
+        enabledCategories,
+      );
+    }
+  }
+
+  function handleTextareaPaste(
+    event: ClipboardEvent<HTMLTextAreaElement>,
+  ): void {
+    if (
+      loadedFile !== null &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === sourceText.length
+    ) {
+      setLoadedFile(null);
+    }
+  }
+
   function handleTextareaKeyDown(
     event: KeyboardEvent<HTMLTextAreaElement>,
   ): void {
@@ -782,7 +812,17 @@ export function WorkspaceShell() {
           {loadedFile && (
             <div className={styles.fileMetaRow}>
               <Badge variant="neutral">
-                {loadedFile.name} ({loadedFile.format.toUpperCase()})
+                <span>
+                  {loadedFile.name} ({loadedFile.format.toUpperCase()})
+                </span>
+                <button
+                  type="button"
+                  className={styles.detachButton}
+                  aria-label="Detach file and treat input as plain text"
+                  onClick={handleDetachFile}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
               </Badge>
             </div>
           )}
@@ -813,6 +853,7 @@ export function WorkspaceShell() {
               aria-invalid={Boolean(workspaceError)}
               aria-describedby="source-input-hint"
               onKeyDown={handleTextareaKeyDown}
+              onPaste={handleTextareaPaste}
               onChange={(event) => {
                 const nextValue = event.target.value;
                 if (nextValue.length > MAX_TEXT_INPUT_LENGTH) {
@@ -830,6 +871,9 @@ export function WorkspaceShell() {
                   return;
                 }
                 setSourceText(nextValue);
+                if (nextValue.trim().length === 0 && loadedFile !== null) {
+                  setLoadedFile(null);
+                }
                 if (workspaceError) {
                   handleDismissError();
                 }

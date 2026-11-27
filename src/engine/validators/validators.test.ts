@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeVerhoeffCheckDigit,
   isValidLuhn,
   isValidVerhoeff,
   validateAadhaar,
@@ -133,6 +134,13 @@ describe('validators', () => {
       }
 
       expect(isValidVerhoeff(contiguous)).toBe(true);
+    });
+
+    it('computes canonical Verhoeff check digits and rejects malformed base strings', () => {
+      const generated = `23456789012${computeVerhoeffCheckDigit('23456789012')}`;
+      expect(isValidVerhoeff(generated)).toBe(true);
+      expect(() => computeVerhoeffCheckDigit('')).toThrow();
+      expect(() => computeVerhoeffCheckDigit('abc')).toThrow();
     });
 
     it('rejects single-digit corruption, adjacent transposition, leading 0/1, and mixed separators', () => {

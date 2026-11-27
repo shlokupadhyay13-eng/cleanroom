@@ -261,4 +261,27 @@ describe('sanitizationClient', () => {
 
     client.dispose();
   });
+
+  it('forwards enabledCategories across worker requests and rejects calls after dispose()', async () => {
+    vi.stubGlobal('Worker', MockWorker);
+    const client = createSanitizationClient({ thresholdChars: 10 });
+
+    const result = await client.sanitizeTextAsync(
+      'Email alice@example.com and PAN ABCPE1234F',
+      'full',
+      new Set(['pan']),
+    );
+    expect(result.usedWorker).toBe(true);
+    expect(result.redaction.sanitizedText).toBe(
+      'Email alice@example.com and PAN [REDACTED]',
+    );
+
+    client.dispose();
+    await expect(
+      client.sanitizeTextAsync('alice@example.com', 'full'),
+    ).rejects.toThrow(/disposed/i);
+    await expect(
+      client.sanitizeCsvAsync('a,b\n1,2', 'full'),
+    ).rejects.toThrow(/disposed/i);
+  });
 });

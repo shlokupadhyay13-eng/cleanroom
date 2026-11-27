@@ -3,6 +3,10 @@ import type { SupportedFileFormat } from '../types/file';
 const MAX_BASE_FILENAME_LENGTH = 80;
 const WINDOWS_RESERVED_NAMES = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 
+/**
+ * Derives a hardened download filename by stripping path traversal segments,
+ * control characters, disallowed punctuation, and Windows reserved device names.
+ */
 export function buildSanitizedFilename(
   sourceFileName: string | null,
   format: SupportedFileFormat,
@@ -39,6 +43,10 @@ export function buildSanitizedFilename(
   return `${finalBase}-sanitized.${format}`;
 }
 
+/**
+ * Exports sanitized output as a UTF-8 Blob download and revokes the temporary
+ * Object URL unconditionally inside finally blocks.
+ */
 export function downloadSanitizedText(
   content: string,
   format: SupportedFileFormat,

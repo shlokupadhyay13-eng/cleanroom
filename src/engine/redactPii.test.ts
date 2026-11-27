@@ -240,5 +240,31 @@ describe('redaction engine', () => {
         expect(redaction.totalSanitized).toBe(0);
       }
     });
+
+    it('rejects out-of-bounds or overlapping spans in redactDetectedEntities and handles trailing :: IPv6', () => {
+      expect(applyPartialMask('ip', '2001:db8::')).toBe('2001:XXXX::');
+      expect(applyPartialMask('pan', 'ABC')).toBe('XXX');
+
+      expect(() =>
+        redactDetectedEntities(
+          'hello',
+          {
+            entities: [
+              {
+                id: 'entity_1',
+                category: 'email',
+                value: 'hello',
+                start: 0,
+                end: 10,
+                validationMethod: 'email-format',
+              },
+            ],
+            countsByCategory: createEmptyCategoryCounts(),
+            totalCount: 1,
+          },
+          { mode: 'full' },
+        ),
+      ).toThrow(/Invalid or overlapping entity span/);
+    });
   });
 });

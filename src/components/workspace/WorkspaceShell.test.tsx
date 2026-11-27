@@ -162,4 +162,56 @@ describe('WorkspaceShell UI & UX refinements', () => {
       screen.getByText('Output: Awaiting sanitization'),
     ).toBeInTheDocument();
   });
+
+  it('auto-detaches loaded CSV mode when all source text is manually cleared', async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceShell />);
+
+    await user.click(screen.getByRole('button', { name: 'Sample CSV' }));
+    expect(screen.getByText('sample-records.csv (CSV)')).toBeInTheDocument();
+
+    const sourceInput = screen.getByLabelText(
+      'Source text for PII sanitization',
+    );
+    await user.clear(sourceInput);
+
+    expect(
+      screen.queryByText('sample-records.csv (CSV)'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('ignores non-file text drags and clears CSV syntax error when detaching errored file', async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceShell />);
+
+    const sourceInput = screen.getByLabelText(
+      'Source text for PII sanitization',
+    ) as HTMLTextAreaElement;
+
+    fireEvent.dragEnter(sourceInput, {
+      dataTransfer: { types: ['text/plain'], files: [] },
+    });
+    expect(
+      screen.queryByText('Drop a .txt or .csv file to load locally'),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Sample CSV' }));
+    await user.click(sourceInput);
+    sourceInput.setSelectionRange(0, 0);
+    await user.keyboard('"');
+    await user.click(screen.getByRole('button', { name: 'Sanitize' }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Detach file and treat input as plain text',
+      }),
+    );
+
+    expect(
+      screen.queryByText('sample-records.csv (CSV)'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });

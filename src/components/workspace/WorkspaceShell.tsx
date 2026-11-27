@@ -9,16 +9,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from 'react';
-import {
-  Check,
-  Copy,
-  Download,
-  FileText,
-  Shield,
-  Table,
-  Trash2,
-  Upload,
-} from 'lucide-react';
+import { Shield } from 'lucide-react';
 import type { ActivityLogEntry } from '../../types/activity';
 import type { DetectedEntity } from '../../types/detection';
 import type {
@@ -39,14 +30,16 @@ import {
 import {
   MAX_TEXT_INPUT_LENGTH,
   appendActivityEntry,
+  buildBoundedSanitizedSegments,
   buildSampleCsvText,
   buildSampleNoisyText,
-  buildSanitizedSegments,
+  computeTextMetrics,
   copyTextToClipboard,
   createActivityEntry,
   createSanitizationClient,
   downloadSanitizedText,
   readLocalFile,
+  sliceBoundedText,
   type SanitizationClient,
 } from '../../utils';
 import { Badge } from '../ui/Badge';
@@ -56,7 +49,8 @@ import { ModeSelector } from '../ui/ModeSelector';
 import { Panel } from '../ui/Panel';
 import { ActivityLogPanel } from './ActivityLogPanel';
 import { ComparisonView, MAX_PREVIEW_CHARS } from './ComparisonView';
-import { HighlightedText } from './HighlightedText';
+import { SanitizedOutputPanel } from './SanitizedOutputPanel';
+import { SourceInputPanel } from './SourceInputPanel';
 import { StatisticsPanel } from './StatisticsPanel';
 import styles from './WorkspaceShell.module.css';
 
@@ -73,12 +67,32 @@ interface SanitizedWorkspaceState {
   readonly csvComparison?: CsvComparisonData;
 }
 
+const INPUT_LIMIT_ERROR =
+  'Input exceeds the 5,000,000 character browser processing limit.';
+
 function createAllEnabledCategories(): Set<PiiCategory> {
   return new Set(PII_CATEGORIES.map((category) => category.id));
 }
 
 function getModeLabel(mode: RedactionMode): string {
   return REDACTION_MODES.find((item) => item.id === mode)?.label ?? mode;
+}
+
+function isFileDragPayload(event: DragEvent<HTMLDivElement>): boolean {
+  const { dataTransfer } = event;
+  if (!dataTransfer) {
+    return false;
+  }
+
+  // Ignore internal text-selection drags when browser supplies non-file MIME types.
+  if (dataTransfer.types && dataTransfer.types.length > 0) {
+    return (
+      Array.from(dataTransfer.types).includes('Files') ||
+      dataTransfer.files.length > 0
+    );
+  }
+
+  return true;
 }
 
 function formatStatusLabel(
@@ -112,6 +126,10 @@ function formatStatusLabel(
   }
 }
 
+/**
+ * Main interactive workspace coordinating local sanitization, mode/category
+ * selection, file/drag ingestion, bounded previews, and PII-free telemetry.
+ */
 export function WorkspaceShell() {
   const [redactionMode, setRedactionMode] = useState<RedactionMode>('full');
   const [enabledCategories, setEnabledCategories] = useState<Set<PiiCategory>>(
@@ -179,11 +197,41 @@ export function WorkspaceShell() {
     setActivityEntries([]);
   }, []);
 
+  function resetWorkspaceSession(
+    nextText: string,
+    nextFile: LoadedFileMeta | null,
+  ): void {
+    runIdRef.current += 1;
+    clearCopyFeedback();
+    getClient().clearSession();
+    setSourceText(nextText);
+    setLoadedFile(nextFile);
+    setWorkspaceError(null);
+    setSanitizedState(null);
+    setIsDirtySinceRun(false);
+    setProcessingStatus('idle');
+  }
+
+  function reportWorkspaceError(
+    message: string,
+    sourceFormat?: 'text' | 'txt' | 'csv',
+  ): void {
+    setProcessingStatus('error');
+    setWorkspaceError(message);
+    recordActivity(
+      createActivityEntry({
+        action: 'error',
+        summary: message,
+        ...(sourceFormat !== undefined ? { sourceFormat } : {}),
+      }),
+    );
+  }
+
   async function executeSanitization(
     input: string,
     mode: RedactionMode,
     format: SupportedFileFormat,
-    sourceLogFormat: 'text' | 'txt' | 'csv',
+    sourceFormat: 'text' | 'txt' | 'csv',
     categories: ReadonlySet<PiiCategory>,
   ): Promise<void> {
     if (input.trim().length === 0 || categories.size === 0) {
@@ -191,17 +239,7 @@ export function WorkspaceShell() {
     }
 
     if (input.length > MAX_TEXT_INPUT_LENGTH) {
-      const limitMessage =
-        'Input exceeds the 5,000,000 character browser processing limit.';
-      setProcessingStatus('error');
-      setWorkspaceError(limitMessage);
-      recordActivity(
-        createActivityEntry({
-          action: 'error',
-          summary: limitMessage,
-          sourceFormat: sourceLogFormat,
-        }),
-      );
+      reportWorkspaceError(INPUT_LIMIT_ERROR, sourceFormat);
       return;
     }
 
@@ -226,15 +264,7 @@ export function WorkspaceShell() {
         }
 
         if (!csvResult.ok) {
-          setProcessingStatus('error');
-          setWorkspaceError(csvResult.error);
-          recordActivity(
-            createActivityEntry({
-              action: 'error',
-              summary: csvResult.error,
-              sourceFormat: 'csv',
-            }),
-          );
+          reportWorkspaceError(csvResult.error, 'csv');
           return;
         }
 
@@ -293,26 +323,19 @@ export function WorkspaceShell() {
       recordActivity(
         createActivityEntry({
           action: 'sanitize',
-          summary: `Sanitized ${sourceLogFormat.toUpperCase()} input using ${getModeLabel(mode)} (${redaction.totalSanitized} ${noun}).`,
+          summary: `Sanitized ${sourceFormat.toUpperCase()} input using ${getModeLabel(mode)} (${redaction.totalSanitized} ${noun}).`,
           mode,
           entityCount: redaction.totalSanitized,
-          sourceFormat: sourceLogFormat,
+          sourceFormat,
         }),
       );
     } catch {
       if (runIdRef.current !== currentRunId) {
         return;
       }
-      const fallbackError =
-        'Unable to complete local sanitization for the current input.';
-      setProcessingStatus('error');
-      setWorkspaceError(fallbackError);
-      recordActivity(
-        createActivityEntry({
-          action: 'error',
-          summary: fallbackError,
-          sourceFormat: sourceLogFormat,
-        }),
+      reportWorkspaceError(
+        'Unable to complete local sanitization for the current input.',
+        sourceFormat,
       );
     }
   }
@@ -352,14 +375,7 @@ export function WorkspaceShell() {
     }
   }
 
-  function handleToggleCategory(category: PiiCategory): void {
-    const nextSet = new Set(enabledCategories);
-    if (nextSet.has(category)) {
-      nextSet.delete(category);
-    } else {
-      nextSet.add(category);
-    }
-
+  function applyCategorySelection(nextSet: Set<PiiCategory>): void {
     setEnabledCategories(nextSet);
     recordActivity(
       createActivityEntry({
@@ -383,51 +399,28 @@ export function WorkspaceShell() {
     }
   }
 
-  function handleResetCategories(): void {
-    const nextSet = createAllEnabledCategories();
-    setEnabledCategories(nextSet);
-    recordActivity(
-      createActivityEntry({
-        action: 'mode_change',
-        summary: `Updated active PII categories (${nextSet.size} of ${PII_CATEGORIES.length} enabled).`,
-      }),
-    );
-
-    if (sanitizedState !== null && sourceText.trim().length > 0) {
-      void executeSanitization(
-        sourceText,
-        redactionMode,
-        activeFormat,
-        logSourceFormat,
-        nextSet,
-      );
+  function handleToggleCategory(category: PiiCategory): void {
+    const nextSet = new Set(enabledCategories);
+    if (nextSet.has(category)) {
+      nextSet.delete(category);
+    } else {
+      nextSet.add(category);
     }
+    applyCategorySelection(nextSet);
+  }
+
+  function handleResetCategories(): void {
+    applyCategorySelection(createAllEnabledCategories());
   }
 
   async function processSelectedFile(file: File): Promise<void> {
     const result = await readLocalFile(file);
     if (!result.ok) {
-      setWorkspaceError(result.error);
-      setProcessingStatus('error');
-      recordActivity(
-        createActivityEntry({
-          action: 'error',
-          summary: result.error,
-        }),
-      );
+      reportWorkspaceError(result.error);
       return;
     }
 
-    runIdRef.current += 1;
-    clearCopyFeedback();
-    getClient().clearSession();
-    setSourceText(result.content);
-    setLoadedFile(result.meta);
-    setWorkspaceError(null);
-    setSanitizedState(null);
-    setIsDirtySinceRun(false);
-    setProcessingStatus('idle');
-
+    resetWorkspaceSession(result.content, result.meta);
     recordActivity(
       createActivityEntry({
         action: 'upload',
@@ -449,6 +442,9 @@ export function WorkspaceShell() {
 
   function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
     event.preventDefault();
+    if (!isFileDragPayload(event)) {
+      return;
+    }
     dragDepthRef.current += 1;
     setIsDragActive(true);
   }
@@ -476,16 +472,7 @@ export function WorkspaceShell() {
   }
 
   function handleLoadSample(): void {
-    runIdRef.current += 1;
-    clearCopyFeedback();
-    getClient().clearSession();
-    setSourceText(buildSampleNoisyText());
-    setLoadedFile(null);
-    setWorkspaceError(null);
-    setSanitizedState(null);
-    setIsDirtySinceRun(false);
-    setProcessingStatus('idle');
-
+    resetWorkspaceSession(buildSampleNoisyText(), null);
     recordActivity(
       createActivityEntry({
         action: 'sample',
@@ -498,20 +485,11 @@ export function WorkspaceShell() {
 
   function handleLoadSampleCsv(): void {
     const csv = buildSampleCsvText();
-    runIdRef.current += 1;
-    clearCopyFeedback();
-    getClient().clearSession();
-    setSourceText(csv);
-    setLoadedFile({
+    resetWorkspaceSession(csv, {
       name: 'sample-records.csv',
       format: 'csv',
       sizeBytes: new Blob([csv]).size,
     });
-    setWorkspaceError(null);
-    setSanitizedState(null);
-    setIsDirtySinceRun(false);
-    setProcessingStatus('idle');
-
     recordActivity(
       createActivityEntry({
         action: 'sample',
@@ -584,16 +562,7 @@ export function WorkspaceShell() {
   }
 
   function handleClearSource(): void {
-    runIdRef.current += 1;
-    clearCopyFeedback();
-    getClient().clearSession();
-    setSourceText('');
-    setLoadedFile(null);
-    setWorkspaceError(null);
-    setSanitizedState(null);
-    setIsDirtySinceRun(false);
-    setProcessingStatus('idle');
-
+    resetWorkspaceSession('', null);
     recordActivity(
       createActivityEntry({
         action: 'clear',
@@ -623,6 +592,12 @@ export function WorkspaceShell() {
         'text',
         enabledCategories,
       );
+      return;
+    }
+
+    if (workspaceError !== null && processingStatus === 'error') {
+      setWorkspaceError(null);
+      setProcessingStatus(sanitizedState ? 'ready' : 'idle');
     }
   }
 
@@ -635,6 +610,25 @@ export function WorkspaceShell() {
       event.currentTarget.selectionEnd === sourceText.length
     ) {
       setLoadedFile(null);
+    }
+  }
+
+  function handleTextareaChange(event: ChangeEvent<HTMLTextAreaElement>): void {
+    const nextValue = event.target.value;
+    if (nextValue.length > MAX_TEXT_INPUT_LENGTH) {
+      reportWorkspaceError(INPUT_LIMIT_ERROR, logSourceFormat);
+      return;
+    }
+
+    setSourceText(nextValue);
+    if (nextValue.trim().length === 0 && loadedFile !== null) {
+      setLoadedFile(null);
+    }
+    if (workspaceError) {
+      handleDismissError();
+    }
+    if (sanitizedState !== null) {
+      setIsDirtySinceRun(nextValue !== sanitizedState.sourceSnapshot);
     }
   }
 
@@ -653,41 +647,33 @@ export function WorkspaceShell() {
     }
   }
 
-  const sourceMetrics = useMemo(() => {
-    if (sourceText.length === 0) {
-      return { chars: 0, lines: 0 };
-    }
-    return {
-      chars: sourceText.length,
-      lines: sourceText.split(/\r?\n/).length,
-    };
-  }, [sourceText]);
+  const sourceMetrics = useMemo(
+    () => computeTextMetrics(sourceText),
+    [sourceText],
+  );
 
   const isOutputPreviewTruncated = Boolean(
     sanitizedState && sanitizedState.sanitizedText.length > MAX_PREVIEW_CHARS,
   );
 
-  const boundedOutputText = useMemo(() => {
-    if (!sanitizedState) {
-      return '';
-    }
-    return sanitizedState.sanitizedText.length > MAX_PREVIEW_CHARS
-      ? sanitizedState.sanitizedText.slice(0, MAX_PREVIEW_CHARS)
-      : sanitizedState.sanitizedText;
-  }, [sanitizedState]);
+  const boundedOutputText = useMemo(
+    () =>
+      sanitizedState
+        ? sliceBoundedText(sanitizedState.sanitizedText, MAX_PREVIEW_CHARS)
+        : '',
+    [sanitizedState],
+  );
 
   const sanitizedOutputSegments = useMemo(() => {
     if (!sanitizedState || sanitizedState.processedFormat === 'csv') {
       return [];
     }
-    const boundedEntities =
-      sanitizedState.sanitizedText.length > MAX_PREVIEW_CHARS
-        ? sanitizedState.redactedEntities.filter(
-            (entity) => entity.sanitizedStart < MAX_PREVIEW_CHARS,
-          )
-        : sanitizedState.redactedEntities;
-    return buildSanitizedSegments(boundedOutputText, boundedEntities);
-  }, [boundedOutputText, sanitizedState]);
+    return buildBoundedSanitizedSegments(
+      sanitizedState.sanitizedText,
+      sanitizedState.redactedEntities,
+      MAX_PREVIEW_CHARS,
+    );
+  }, [sanitizedState]);
 
   const plainComparisonInput = useMemo(() => {
     if (!sanitizedState || sanitizedState.processedFormat !== 'txt') {
@@ -765,225 +751,45 @@ export function WorkspaceShell() {
       )}
 
       <div className={styles.editorGrid}>
-        <Panel
-          title="Source Input"
-          actions={
-            <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".txt,.csv"
-                className="sr-only"
-                aria-label="Upload .txt or .csv file"
-                onChange={handleFileInputChange}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Upload size={14} strokeWidth={2} aria-hidden="true" />
-                <span>Upload File</span>
-              </Button>
-              <Button variant="secondary" size="sm" onClick={handleLoadSample}>
-                <FileText size={14} strokeWidth={2} aria-hidden="true" />
-                <span>Load Sample</span>
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleLoadSampleCsv}
-              >
-                <Table size={14} strokeWidth={2} aria-hidden="true" />
-                <span>Sample CSV</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!canClear}
-                onClick={handleClearSource}
-              >
-                <Trash2 size={14} strokeWidth={2} aria-hidden="true" />
-                <span>Clear</span>
-              </Button>
-            </>
-          }
-        >
-          {loadedFile && (
-            <div className={styles.fileMetaRow}>
-              <Badge variant="neutral">
-                <span>
-                  {loadedFile.name} ({loadedFile.format.toUpperCase()})
-                </span>
-                <button
-                  type="button"
-                  className={styles.detachButton}
-                  aria-label="Detach file and treat input as plain text"
-                  onClick={handleDetachFile}
-                >
-                  <span aria-hidden="true">×</span>
-                </button>
-              </Badge>
-            </div>
-          )}
-          <div
-            className={[
-              styles.dropZone,
-              isDragActive ? styles.dropZoneActive : undefined,
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            {isDragActive && (
-              <p className={styles.dropHint}>
-                Drop a .txt or .csv file to load locally
-              </p>
-            )}
-            <label htmlFor="source-input" className="sr-only">
-              Source text for PII sanitization
-            </label>
-            <textarea
-              id="source-input"
-              className={styles.textarea}
-              value={sourceText}
-              aria-invalid={Boolean(workspaceError)}
-              aria-describedby="source-input-hint"
-              onKeyDown={handleTextareaKeyDown}
-              onPaste={handleTextareaPaste}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                if (nextValue.length > MAX_TEXT_INPUT_LENGTH) {
-                  const limitMessage =
-                    'Input exceeds the 5,000,000 character browser processing limit.';
-                  setWorkspaceError(limitMessage);
-                  setProcessingStatus('error');
-                  recordActivity(
-                    createActivityEntry({
-                      action: 'error',
-                      summary: limitMessage,
-                      sourceFormat: logSourceFormat,
-                    }),
-                  );
-                  return;
-                }
-                setSourceText(nextValue);
-                if (nextValue.trim().length === 0 && loadedFile !== null) {
-                  setLoadedFile(null);
-                }
-                if (workspaceError) {
-                  handleDismissError();
-                }
-                if (sanitizedState !== null) {
-                  setIsDirtySinceRun(nextValue !== sanitizedState.sourceSnapshot);
-                }
-              }}
-              placeholder="Paste text containing emails, phone numbers, IP addresses, PAN, Aadhaar, or credit card numbers..."
-              rows={12}
-            />
-          </div>
-          <div className={styles.paneFooter}>
-            <span id="source-input-hint">
-              Tip: Press Ctrl+Enter (or Cmd+Enter) to sanitize locally.
-            </span>
-            <span className={styles.paneMetric}>
-              {sourceMetrics.chars.toLocaleString('en-US')} chars ·{' '}
-              {sourceMetrics.lines.toLocaleString('en-US')} lines
-            </span>
-          </div>
-        </Panel>
+        <SourceInputPanel
+          fileInputRef={fileInputRef}
+          sourceText={sourceText}
+          sourceMetrics={sourceMetrics}
+          loadedFile={loadedFile}
+          hasError={Boolean(workspaceError)}
+          isDragActive={isDragActive}
+          canClear={canClear}
+          onFileInputChange={handleFileInputChange}
+          onLoadSample={handleLoadSample}
+          onLoadSampleCsv={handleLoadSampleCsv}
+          onClearSource={handleClearSource}
+          onDetachFile={handleDetachFile}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onTextareaKeyDown={handleTextareaKeyDown}
+          onTextareaPaste={handleTextareaPaste}
+          onTextareaChange={handleTextareaChange}
+        />
 
-        <Panel
-          title="Sanitized Output"
-          actions={
-            <>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!canCopyOrDownload}
-                onClick={() => {
-                  void handleCopyOutput();
-                }}
-              >
-                {copied ? (
-                  <Check size={14} strokeWidth={2} aria-hidden="true" />
-                ) : (
-                  <Copy size={14} strokeWidth={2} aria-hidden="true" />
-                )}
-                <span>{copied ? 'Copied' : 'Copy'}</span>
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!canCopyOrDownload}
-                onClick={handleDownload}
-              >
-                <Download size={14} strokeWidth={2} aria-hidden="true" />
-                <span>Download</span>
-              </Button>
-              <span role="status" aria-live="polite" className="sr-only">
-                {copyAnnouncement}
-              </span>
-            </>
-          }
-        >
-          <div
-            aria-busy={processingStatus === 'processing'}
-            className={[
-              styles.outputBox,
-              sanitizedState !== null ? styles.outputBoxPopulated : undefined,
-            ]
-              .filter(Boolean)
-              .join(' ')}
-          >
-            {sanitizedState !== null ? (
-              <div className={styles.outputContent}>
-                {sanitizedState.totalDetected === 0 && (
-                  <p className={styles.zeroMatchBanner}>
-                    Processed locally — no supported PII patterns were detected.
-                  </p>
-                )}
-                {isOutputPreviewTruncated && (
-                  <p className={styles.zeroMatchBanner}>
-                    Showing first {MAX_PREVIEW_CHARS.toLocaleString('en-US')} of{' '}
-                    {sanitizedState.sanitizedText.length.toLocaleString('en-US')}{' '}
-                    characters in this preview. Copy and Download include the
-                    complete sanitized output.
-                  </p>
-                )}
-                {sanitizedState.processedFormat === 'csv' ? (
-                  <pre className={styles.outputPre}>{boundedOutputText}</pre>
-                ) : (
-                  <HighlightedText
-                    segments={sanitizedOutputSegments}
-                    tone="sanitized"
-                    className={styles.outputHighlighted}
-                  />
-                )}
-              </div>
-            ) : (
-              <p className={styles.emptyState}>
-                Paste text, upload a .txt or .csv file, or load sample text,
-                then click Sanitize.
-              </p>
-            )}
-          </div>
-          <div className={styles.paneFooter}>
-            <span>
-              {sanitizedState === null
-                ? 'Output: Awaiting sanitization'
-                : `Output: Ready (${sanitizedState.processedFormat.toUpperCase()})`}
-            </span>
-            <span className={styles.paneMetric}>
-              {sanitizedState !== null
-                ? `${sanitizedState.sanitizedText.length.toLocaleString('en-US')} chars`
-                : ''}
-            </span>
-          </div>
-        </Panel>
+        <SanitizedOutputPanel
+          isProcessing={processingStatus === 'processing'}
+          hasOutput={sanitizedState !== null}
+          processedFormat={sanitizedState?.processedFormat ?? null}
+          totalDetected={sanitizedState?.totalDetected ?? 0}
+          fullLength={sanitizedState?.sanitizedText.length ?? 0}
+          boundedOutputText={boundedOutputText}
+          sanitizedSegments={sanitizedOutputSegments}
+          isPreviewTruncated={isOutputPreviewTruncated}
+          canCopyOrDownload={canCopyOrDownload}
+          copied={copied}
+          copyAnnouncement={copyAnnouncement}
+          onCopy={() => {
+            void handleCopyOutput();
+          }}
+          onDownload={handleDownload}
+        />
       </div>
 
       {sanitizedState !== null && (

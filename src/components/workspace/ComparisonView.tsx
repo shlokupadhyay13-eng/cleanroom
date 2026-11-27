@@ -1,8 +1,10 @@
 import { memo, useMemo } from 'react';
 import type { DetectedEntity } from '../../types/detection';
-import type { CsvComparisonData } from '../../types/file';
+import type { CsvComparisonCell, CsvComparisonData } from '../../types/file';
 import type { RedactedEntity } from '../../types/redaction';
 import {
+  buildBoundedDetectedSegments,
+  buildBoundedSanitizedSegments,
   buildDetectedSegments,
   buildSanitizedSegments,
 } from '../../utils';
@@ -26,6 +28,72 @@ export interface ComparisonViewProps {
   readonly csvComparison?: CsvComparisonData;
 }
 
+interface CsvComparisonTableProps {
+  readonly heading: string;
+  readonly caption: string;
+  readonly headers: readonly string[];
+  readonly rows: readonly (readonly CsvComparisonCell[])[];
+  readonly tone: 'detected' | 'sanitized';
+  readonly keyPrefix: string;
+}
+
+const CsvComparisonTable = memo(function CsvComparisonTable({
+  heading,
+  caption,
+  headers,
+  rows,
+  tone,
+  keyPrefix,
+}: CsvComparisonTableProps) {
+  return (
+    <div className={styles.column}>
+      <h3 className={styles.columnHeading}>{heading}</h3>
+      <div className={styles.tableWrapper}>
+        <table className={styles.csvTable}>
+          <caption className="sr-only">{caption}</caption>
+          <thead>
+            <tr>
+              {headers.map((header, colIndex) => (
+                <th key={`${keyPrefix}_h_${colIndex}`} scope="col">
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`${keyPrefix}_r_${rowIndex}`}>
+                {row.map((cell, colIndex) => (
+                  <td key={`${keyPrefix}_c_${rowIndex}_${colIndex}`}>
+                    <HighlightedText
+                      segments={
+                        tone === 'detected'
+                          ? buildDetectedSegments(
+                              cell.originalValue,
+                              cell.detectedEntities,
+                            )
+                          : buildSanitizedSegments(
+                              cell.sanitizedValue,
+                              cell.redactedEntities,
+                            )
+                      }
+                      tone={tone}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Renders paired side-by-side comparison views for plain text or CSV tables
+ * with bounded DOM preview sizes to maintain responsiveness on large documents.
+ */
 export const ComparisonView = memo(function ComparisonView({
   totalDetected,
   plainComparison,
@@ -41,34 +109,22 @@ export const ComparisonView = memo(function ComparisonView({
     if (!plainComparison) {
       return [];
     }
-    const boundedSource =
-      plainComparison.sourceText.length > MAX_PREVIEW_CHARS
-        ? plainComparison.sourceText.slice(0, MAX_PREVIEW_CHARS)
-        : plainComparison.sourceText;
-    const boundedEntities =
-      plainComparison.sourceText.length > MAX_PREVIEW_CHARS
-        ? plainComparison.detectedEntities.filter(
-            (entity) => entity.start < MAX_PREVIEW_CHARS,
-          )
-        : plainComparison.detectedEntities;
-    return buildDetectedSegments(boundedSource, boundedEntities);
+    return buildBoundedDetectedSegments(
+      plainComparison.sourceText,
+      plainComparison.detectedEntities,
+      MAX_PREVIEW_CHARS,
+    );
   }, [plainComparison]);
 
   const sanitizedSegments = useMemo(() => {
     if (!plainComparison) {
       return [];
     }
-    const boundedSanitized =
-      plainComparison.sanitizedText.length > MAX_PREVIEW_CHARS
-        ? plainComparison.sanitizedText.slice(0, MAX_PREVIEW_CHARS)
-        : plainComparison.sanitizedText;
-    const boundedEntities =
-      plainComparison.sanitizedText.length > MAX_PREVIEW_CHARS
-        ? plainComparison.redactedEntities.filter(
-            (entity) => entity.sanitizedStart < MAX_PREVIEW_CHARS,
-          )
-        : plainComparison.redactedEntities;
-    return buildSanitizedSegments(boundedSanitized, boundedEntities);
+    return buildBoundedSanitizedSegments(
+      plainComparison.sanitizedText,
+      plainComparison.redactedEntities,
+      MAX_PREVIEW_CHARS,
+    );
   }, [plainComparison]);
 
   const isCsvTruncated = Boolean(
@@ -143,79 +199,22 @@ export const ComparisonView = memo(function ComparisonView({
 
       {csvComparison && (
         <div className={styles.comparisonGrid}>
-          <div className={styles.column}>
-            <h3 className={styles.columnHeading}>Detected Entities (Source)</h3>
-            <div className={styles.tableWrapper}>
-              <table className={styles.csvTable}>
-                <caption className="sr-only">
-                  Detected PII entities in source CSV data
-                </caption>
-                <thead>
-                  <tr>
-                    {csvComparison.headers.map((header, colIndex) => (
-                      <th key={`src_h_${colIndex}`} scope="col">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewCsvRows.map((row, rowIndex) => (
-                    <tr key={`src_r_${rowIndex}`}>
-                      {row.map((cell, colIndex) => (
-                        <td key={`src_c_${rowIndex}_${colIndex}`}>
-                          <HighlightedText
-                            segments={buildDetectedSegments(
-                              cell.originalValue,
-                              cell.detectedEntities,
-                            )}
-                            tone="detected"
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className={styles.column}>
-            <h3 className={styles.columnHeading}>Sanitized Output</h3>
-            <div className={styles.tableWrapper}>
-              <table className={styles.csvTable}>
-                <caption className="sr-only">
-                  Sanitized CSV output comparison preview
-                </caption>
-                <thead>
-                  <tr>
-                    {csvComparison.headers.map((header, colIndex) => (
-                      <th key={`san_h_${colIndex}`} scope="col">
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewCsvRows.map((row, rowIndex) => (
-                    <tr key={`san_r_${rowIndex}`}>
-                      {row.map((cell, colIndex) => (
-                        <td key={`san_c_${rowIndex}_${colIndex}`}>
-                          <HighlightedText
-                            segments={buildSanitizedSegments(
-                              cell.sanitizedValue,
-                              cell.redactedEntities,
-                            )}
-                            tone="sanitized"
-                          />
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <CsvComparisonTable
+            heading="Detected Entities (Source)"
+            caption="Detected PII entities in source CSV data"
+            headers={csvComparison.headers}
+            rows={previewCsvRows}
+            tone="detected"
+            keyPrefix="src"
+          />
+          <CsvComparisonTable
+            heading="Sanitized Output"
+            caption="Sanitized CSV output comparison preview"
+            headers={csvComparison.headers}
+            rows={previewCsvRows}
+            tone="sanitized"
+            keyPrefix="san"
+          />
         </div>
       )}
     </Panel>

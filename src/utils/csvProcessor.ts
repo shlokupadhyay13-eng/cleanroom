@@ -3,6 +3,7 @@ import { createPseudonymSession, sanitizeText } from '../engine';
 import type { RedactedEntity, RedactionOptions } from '../types/redaction';
 import type { CsvComparisonCell, CsvSanitizationResult } from '../types/file';
 import { createEmptyCategoryCounts, PII_CATEGORIES } from '../types/ui';
+import { stripUtf8Bom } from './textNormalization';
 
 export type CsvParseResult =
   | {
@@ -29,7 +30,7 @@ function detectLineEnding(rawCsv: string): '\r\n' | '\n' {
 }
 
 function normalizeTrailingNewlines(rawCsv: string): string {
-  const withoutBom = rawCsv.startsWith('\uFEFF') ? rawCsv.slice(1) : rawCsv;
+  const withoutBom = stripUtf8Bom(rawCsv);
   return withoutBom.replace(/(?:\r?\n)+$/, '');
 }
 

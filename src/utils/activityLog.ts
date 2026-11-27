@@ -40,6 +40,9 @@ export function sanitizeLogSummary(rawSummary: string): string {
   return `${redacted.slice(0, MAX_SUMMARY_LENGTH - 3)}...`;
 }
 
+/**
+ * Formats a Date into HH:MM:SS local wall-clock time without milliseconds or locale drift.
+ */
 export function formatLocalTimestamp(date: Date = new Date()): string {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
@@ -47,6 +50,9 @@ export function formatLocalTimestamp(date: Date = new Date()): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
+/**
+ * Creates an immutable activity log entry with defense-in-depth PII scrubbing.
+ */
 export function createActivityEntry(
   params: CreateActivityEntryParams,
 ): ActivityLogEntry {
@@ -67,6 +73,9 @@ export function createActivityEntry(
   };
 }
 
+/**
+ * Prepends an activity entry while keeping the log bounded at MAX_ACTIVITY_LOG_ENTRIES.
+ */
 export function appendActivityEntry(
   entries: readonly ActivityLogEntry[],
   next: ActivityLogEntry,

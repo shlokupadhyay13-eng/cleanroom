@@ -4,6 +4,7 @@ import {
   readLocalFile,
   validateFile,
 } from './fileLoader';
+import { computeTextMetrics, stripUtf8Bom } from './textNormalization';
 
 describe('fileLoader', () => {
   it('validates and reads a local .txt file', async () => {
@@ -113,5 +114,13 @@ describe('fileLoader', () => {
         expect(result.error).not.toContain('Alice');
       }
     }
+  });
+
+  it('normalizes UTF-8 BOMs and computes exact character and line metrics', () => {
+    expect(stripUtf8Bom('\uFEFFhello')).toBe('hello');
+    expect(stripUtf8Bom('hello')).toBe('hello');
+
+    expect(computeTextMetrics('')).toEqual({ chars: 0, lines: 0 });
+    expect(computeTextMetrics('a\nb\r\nc')).toEqual({ chars: 6, lines: 3 });
   });
 });

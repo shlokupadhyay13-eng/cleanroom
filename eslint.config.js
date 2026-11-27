@@ -21,6 +21,9 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
+      curly: ['error', 'all'],
+      eqeqeq: ['error', 'always'],
+      'no-console': 'error',
     },
   },
 ]);

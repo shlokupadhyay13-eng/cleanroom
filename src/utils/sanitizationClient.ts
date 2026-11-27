@@ -55,6 +55,19 @@ export interface CreateSanitizationClientOptions {
   readonly thresholdChars?: number;
 }
 
+function serializeEnabledCategories(
+  enabledCategories?: ReadonlySet<PiiCategory>,
+): PiiCategory[] | undefined {
+  return enabledCategories !== undefined
+    ? Array.from(enabledCategories)
+    : undefined;
+}
+
+/**
+ * Creates a client-side sanitization coordinator that executes small inputs
+ * synchronously and offloads large inputs (>= thresholdChars) to a local
+ * module Web Worker while correlating concurrent runs by requestId.
+ */
 export function createSanitizationClient(
   options: CreateSanitizationClientOptions = {},
 ): SanitizationClient {
@@ -71,6 +84,16 @@ export function createSanitizationClient(
       entry.reject(new Error(reason));
     }
     pending.clear();
+  }
+
+  function teardownWorker(): void {
+    if (!worker) {
+      return;
+    }
+    worker.removeEventListener('message', handleWorkerMessage);
+    worker.removeEventListener('error', handleWorkerError);
+    worker.terminate();
+    worker = null;
   }
 
   function handleWorkerMessage(
@@ -110,10 +133,7 @@ export function createSanitizationClient(
 
   function handleWorkerError(): void {
     rejectAllPending('Local worker execution failed.');
-    if (worker) {
-      worker.terminate();
-      worker = null;
-    }
+    teardownWorker();
   }
 
   function getOrCreateWorker(): Worker | null {
@@ -133,8 +153,32 @@ export function createSanitizationClient(
     return worker;
   }
 
-  function postToWorker(message: WorkerSanitizeRequest): void {
-    worker?.postMessage(message);
+  function runWithWorker<TOutput>(
+    inputLength: number,
+    registerPending: (
+      requestId: number,
+      resolve: (value: TOutput) => void,
+      reject: (reason: Error) => void,
+    ) => WorkerSanitizeRequest,
+    runSync: () => TOutput,
+  ): Promise<TOutput> {
+    if (disposed) {
+      return Promise.reject(new Error('Sanitization client has been disposed.'));
+    }
+
+    if (inputLength >= thresholdChars) {
+      const activeWorker = getOrCreateWorker();
+      if (activeWorker) {
+        nextRequestId += 1;
+        const requestId = nextRequestId;
+        return new Promise<TOutput>((resolve, reject) => {
+          const message = registerPending(requestId, resolve, reject);
+          activeWorker.postMessage(message);
+        });
+      }
+    }
+
+    return Promise.resolve(runSync());
   }
 
   return {
@@ -143,45 +187,36 @@ export function createSanitizationClient(
       mode: RedactionMode,
       enabledCategories?: ReadonlySet<PiiCategory>,
     ): Promise<SanitizeTextAsyncOutput> {
-      if (disposed) {
-        return Promise.reject(new Error('Sanitization client has been disposed.'));
-      }
+      const serializedCategories =
+        serializeEnabledCategories(enabledCategories);
 
-      if (text.length >= thresholdChars) {
-        const activeWorker = getOrCreateWorker();
-        if (activeWorker) {
-          nextRequestId += 1;
-          const requestId = nextRequestId;
-          const serializedCategories =
-            enabledCategories !== undefined
-              ? Array.from(enabledCategories)
-              : undefined;
-
-          return new Promise<SanitizeTextAsyncOutput>((resolve, reject) => {
-            pending.set(requestId, { kind: 'text', resolve, reject });
-            activeWorker.postMessage({
-              type: 'sanitize-text',
-              requestId,
-              text,
-              mode,
-              ...(serializedCategories !== undefined
-                ? { enabledCategories: serializedCategories }
-                : {}),
-            } satisfies WorkerSanitizeRequest);
+      return runWithWorker<SanitizeTextAsyncOutput>(
+        text.length,
+        (requestId, resolve, reject) => {
+          pending.set(requestId, { kind: 'text', resolve, reject });
+          return {
+            type: 'sanitize-text',
+            requestId,
+            text,
+            mode,
+            ...(serializedCategories !== undefined
+              ? { enabledCategories: serializedCategories }
+              : {}),
+          };
+        },
+        (): SanitizeTextAsyncOutput => {
+          const { detection, redaction } = sanitizeText(text, {
+            mode,
+            pseudonymSession: syncSession,
+            ...(enabledCategories !== undefined ? { enabledCategories } : {}),
           });
-        }
-      }
-
-      const { detection, redaction } = sanitizeText(text, {
-        mode,
-        pseudonymSession: syncSession,
-        ...(enabledCategories !== undefined ? { enabledCategories } : {}),
-      });
-      return Promise.resolve({
-        detection,
-        redaction,
-        usedWorker: false,
-      });
+          return {
+            detection,
+            redaction,
+            usedWorker: false,
+          };
+        },
+      );
     },
 
     sanitizeCsvAsync(
@@ -189,51 +224,41 @@ export function createSanitizationClient(
       mode: RedactionMode,
       enabledCategories?: ReadonlySet<PiiCategory>,
     ): Promise<SanitizeCsvAsyncOutput> {
-      if (disposed) {
-        return Promise.reject(new Error('Sanitization client has been disposed.'));
-      }
+      const serializedCategories =
+        serializeEnabledCategories(enabledCategories);
 
-      if (csvText.length >= thresholdChars) {
-        const activeWorker = getOrCreateWorker();
-        if (activeWorker) {
-          nextRequestId += 1;
-          const requestId = nextRequestId;
-          const serializedCategories =
-            enabledCategories !== undefined
-              ? Array.from(enabledCategories)
-              : undefined;
-
-          return new Promise<SanitizeCsvAsyncOutput>((resolve, reject) => {
-            pending.set(requestId, { kind: 'csv', resolve, reject });
-            activeWorker.postMessage({
-              type: 'sanitize-csv',
-              requestId,
-              csvText,
-              mode,
-              ...(serializedCategories !== undefined
-                ? { enabledCategories: serializedCategories }
-                : {}),
-            } satisfies WorkerSanitizeRequest);
-          });
-        }
-      }
-
-      const result = sanitizeCsvText(csvText, {
-        mode,
-        pseudonymSession: syncSession,
-        ...(enabledCategories !== undefined ? { enabledCategories } : {}),
-      });
-      return Promise.resolve({
-        result,
-        usedWorker: false,
-      });
+      return runWithWorker<SanitizeCsvAsyncOutput>(
+        csvText.length,
+        (requestId, resolve, reject) => {
+          pending.set(requestId, { kind: 'csv', resolve, reject });
+          return {
+            type: 'sanitize-csv',
+            requestId,
+            csvText,
+            mode,
+            ...(serializedCategories !== undefined
+              ? { enabledCategories: serializedCategories }
+              : {}),
+          };
+        },
+        (): SanitizeCsvAsyncOutput => ({
+          result: sanitizeCsvText(csvText, {
+            mode,
+            pseudonymSession: syncSession,
+            ...(enabledCategories !== undefined ? { enabledCategories } : {}),
+          }),
+          usedWorker: false,
+        }),
+      );
     },
 
     clearSession(): void {
       syncSession.clear();
       rejectAllPending('Sanitization session cleared.');
       if (worker) {
-        postToWorker({ type: 'clear-session' });
+        worker.postMessage({
+          type: 'clear-session',
+        } satisfies WorkerSanitizeRequest);
       }
     },
 
@@ -241,12 +266,7 @@ export function createSanitizationClient(
       disposed = true;
       syncSession.clear();
       rejectAllPending('Sanitization client disposed.');
-      if (worker) {
-        worker.removeEventListener('message', handleWorkerMessage);
-        worker.removeEventListener('error', handleWorkerError);
-        worker.terminate();
-        worker = null;
-      }
+      teardownWorker();
     },
   };
 }

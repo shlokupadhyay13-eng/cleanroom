@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { sanitizeText } from '../engine';
 import {
+  buildBoundedDetectedSegments,
+  buildBoundedSanitizedSegments,
   buildDetectedSegments,
   buildSanitizedSegments,
+  sliceBoundedText,
 } from './highlightSegments';
 
 describe('highlightSegments', () => {
@@ -75,5 +78,33 @@ describe('highlightSegments', () => {
     );
     expect(sanitized.map((s) => s.text).join('')).toBe('[REDACTED],[REDACTED]');
     expect(sanitized.filter((s) => s.highlighted)).toHaveLength(2);
+  });
+
+  it('caps text and highlight segments safely at maxChars boundaries', () => {
+    const source = 'alice@example.com tail bob@example.com';
+    const { detection, redaction } = sanitizeText(source, { mode: 'full' });
+
+    expect(sliceBoundedText(source, 20)).toBe('alice@example.com ta');
+    expect(sliceBoundedText('short', 20)).toBe('short');
+
+    const boundedDetected = buildBoundedDetectedSegments(
+      source,
+      detection.entities,
+      20,
+    );
+    expect(boundedDetected.map((s) => s.text).join('')).toBe(
+      'alice@example.com ta',
+    );
+    expect(boundedDetected.filter((s) => s.highlighted)).toHaveLength(1);
+
+    const boundedSanitized = buildBoundedSanitizedSegments(
+      redaction.sanitizedText,
+      redaction.entities,
+      15,
+    );
+    expect(boundedSanitized.map((s) => s.text).join('')).toBe(
+      '[REDACTED] tail',
+    );
+    expect(boundedSanitized.filter((s) => s.highlighted)).toHaveLength(1);
   });
 });

@@ -23,8 +23,11 @@ export {
   validateFile,
 } from './fileLoader';
 export {
+  buildBoundedDetectedSegments,
+  buildBoundedSanitizedSegments,
   buildDetectedSegments,
   buildSanitizedSegments,
+  sliceBoundedText,
 } from './highlightSegments';
 export type { HighlightSegment } from './highlightSegments';
 export {
@@ -41,3 +44,5 @@ export type {
   SanitizeCsvAsyncOutput,
   SanitizeTextAsyncOutput,
 } from './sanitizationClient';
+export { computeTextMetrics } from './textNormalization';
+export type { TextMetrics } from './textNormalization';

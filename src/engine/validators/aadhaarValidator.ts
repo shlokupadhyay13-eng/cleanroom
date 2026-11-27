@@ -29,6 +29,33 @@ const VERHOEFF_P: readonly (readonly number[])[] = [
 const VERHOEFF_INV: readonly number[] = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9];
 
 /**
+ * Computes the trailing Verhoeff dihedral group D5 check digit for a numeric
+ * prefix so synthetic test fixtures share the same canonical table as validation.
+ */
+export function computeVerhoeffCheckDigit(baseDigits: string): string {
+  if (!/^\d+$/.test(baseDigits) || baseDigits.length === 0) {
+    throw new Error('Verhoeff check-digit input must be a non-empty digit string.');
+  }
+
+  let c = 0;
+  for (let offset = 0; offset < baseDigits.length; offset += 1) {
+    const digit = baseDigits.charCodeAt(baseDigits.length - 1 - offset) - 48;
+    const permuted = VERHOEFF_P[(offset + 1) % 8]?.[digit];
+    if (permuted === undefined) {
+      throw new Error('Unexpected digit out of range while computing Verhoeff check digit.');
+    }
+
+    const next = VERHOEFF_D[c]?.[permuted];
+    if (next === undefined) {
+      throw new Error('Unexpected state while computing Verhoeff check digit.');
+    }
+    c = next;
+  }
+
+  return String(VERHOEFF_INV[c] ?? 0);
+}
+
+/**
  * Validates numeric checksum integrity using the Verhoeff dihedral group D5 algorithm.
  * Note: Verhoeff validation verifies structural checksum integrity only and never
  * confirms real identity or UIDAI issuance.

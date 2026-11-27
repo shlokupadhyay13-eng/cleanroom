@@ -14,6 +14,7 @@ export {
 export { createPseudonymSession } from './pseudonymSession';
 export { redactDetectedEntities, sanitizeText } from './redactPii';
 export {
+  computeVerhoeffCheckDigit,
   isValidLuhn,
   isValidVerhoeff,
   validateAadhaar,

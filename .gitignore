@@ -6,11 +6,16 @@ npm-debug.log*
 # Dependencies
 node_modules
 
-# Build output
+# Build and test output
 dist
 dist-ssr
+coverage
+*.tsbuildinfo
 
 # Environment and local files
+.env
+.env.*
+!.env.example
 *.local
 .DS_Store
 

@@ -12,6 +12,11 @@ interface ValidatedCandidate extends RawCandidate {
   readonly validationMethod: string;
 }
 
+/**
+ * Scans input text locally across enabled PII detectors, validates each candidate
+ * before resolving overlaps so invalid longer tokens cannot shadow valid entities,
+ * and returns deterministic offset-verified entities plus category counts.
+ */
 export function detectPii(
   text: string,
   options?: DetectPiiOptions,

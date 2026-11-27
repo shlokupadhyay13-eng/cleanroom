@@ -4,14 +4,13 @@ import type {
   SupportedFileFormat,
 } from '../types/file';
 import { parseCsvSafely } from './csvProcessor';
+import { stripUtf8Bom } from './textNormalization';
 
 export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 export const MAX_TEXT_INPUT_LENGTH = 5_000_000;
 export const ACCEPTED_FILE_EXTENSIONS = ['.txt', '.csv'] as const;
 
-export function stripUtf8Bom(text: string): string {
-  return text.startsWith('\uFEFF') ? text.slice(1) : text;
-}
+export { stripUtf8Bom };
 
 const ALLOWED_MIME_TYPES = new Set([
   'text/plain',
@@ -65,6 +64,10 @@ async function readFileAsText(file: File): Promise<string> {
   });
 }
 
+/**
+ * Checks local file extension, non-empty size bounds (<= 5 MB), and declared
+ * MIME type before reading any file bytes into browser memory.
+ */
 export function validateFile(file: File): FileValidationResult {
   const format = getFormatFromExtension(file.name);
   if (!format) {
@@ -99,6 +102,10 @@ export function validateFile(file: File): FileValidationResult {
   return { ok: true, format };
 }
 
+/**
+ * Validates and reads a local .txt or .csv File entirely in browser memory,
+ * rejecting binary null bytes, character overruns, empty files, and malformed CSVs.
+ */
 export async function readLocalFile(file: File): Promise<FileLoadResult> {
   const validation = validateFile(file);
   if (!validation.ok) {

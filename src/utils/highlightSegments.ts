@@ -68,6 +68,17 @@ function buildSegmentsFromSpans(
   return segments;
 }
 
+/**
+ * Truncates preview strings cleanly to keep React DOM node counts bounded
+ * while preserving full text for Copy and Download actions.
+ */
+export function sliceBoundedText(text: string, maxChars: number): string {
+  return text.length > maxChars ? text.slice(0, maxChars) : text;
+}
+
+/**
+ * Splits source text into plain and highlighted segments matching detected PII offsets.
+ */
 export function buildDetectedSegments(
   sourceText: string,
   entities: readonly DetectedEntity[],
@@ -84,6 +95,25 @@ export function buildDetectedSegments(
   );
 }
 
+/**
+ * Builds detected highlight segments capped at maxChars for bounded preview panes.
+ */
+export function buildBoundedDetectedSegments(
+  sourceText: string,
+  entities: readonly DetectedEntity[],
+  maxChars: number,
+): HighlightSegment[] {
+  const boundedSource = sliceBoundedText(sourceText, maxChars);
+  const boundedEntities =
+    sourceText.length > maxChars
+      ? entities.filter((entity) => entity.start < maxChars)
+      : entities;
+  return buildDetectedSegments(boundedSource, boundedEntities);
+}
+
+/**
+ * Splits sanitized text into plain and highlighted replacement segments.
+ */
 export function buildSanitizedSegments(
   sanitizedText: string,
   entities: readonly RedactedEntity[],
@@ -98,4 +128,20 @@ export function buildSanitizedSegments(
       validationMethod: entity.validationMethod,
     })),
   );
+}
+
+/**
+ * Builds sanitized replacement highlight segments capped at maxChars for preview panes.
+ */
+export function buildBoundedSanitizedSegments(
+  sanitizedText: string,
+  entities: readonly RedactedEntity[],
+  maxChars: number,
+): HighlightSegment[] {
+  const boundedText = sliceBoundedText(sanitizedText, maxChars);
+  const boundedEntities =
+    sanitizedText.length > maxChars
+      ? entities.filter((entity) => entity.sanitizedStart < maxChars)
+      : entities;
+  return buildSanitizedSegments(boundedText, boundedEntities);
 }

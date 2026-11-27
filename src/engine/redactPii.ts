@@ -28,6 +28,10 @@ function resolveReplacement(
   }
 }
 
+/**
+ * Replaces validated entity spans while preserving unaffected characters verbatim
+ * and recording exact post-redaction character offsets for UI highlighting.
+ */
 export function redactDetectedEntities(
   text: string,
   detection: DetectionResult,
@@ -116,6 +120,10 @@ export function redactDetectedEntities(
   };
 }
 
+/**
+ * Convenience pipeline that runs PII detection followed by redaction using
+ * consistent options and category filters.
+ */
 export function sanitizeText(
   text: string,
   options: RedactionOptions,
